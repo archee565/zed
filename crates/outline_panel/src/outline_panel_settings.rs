@@ -1,8 +1,9 @@
 use editor::{EditorSettings, ui_scrollbar_settings_from_raw};
-use gpui::{App, Pixels};
+use gpui::{App, FontWeight, Pixels, Rems, SharedString, rems};
 use language::SymbolKind;
 pub use settings::{DockSide, FolderIndicator, OutlineSymbolKind, Settings, ShowIndentGuides};
 use settings::{IntoGpui, RegisterSetting};
+use theme_settings::ThemeSettings;
 use ui::scrollbars::{ScrollbarVisibility, ShowScrollbar};
 
 #[derive(Debug, Clone, PartialEq, RegisterSetting)]
@@ -20,6 +21,37 @@ pub struct OutlinePanelSettings {
     pub scrollbar: ScrollbarSettings,
     pub expand_outlines_with_depth: usize,
     pub multi_buffer_hide_symbols: bool,
+    pub font_family: Option<SharedString>,
+    pub font_size_percentage: f32,
+    pub font_weight: Option<FontWeight>,
+    pub line_height: Option<f32>,
+}
+
+/// The font settings used to render the outline panel contents.
+#[derive(Clone, Debug)]
+pub struct OutlinePanelFont {
+    pub family: SharedString,
+    pub size: Rems,
+    pub weight: FontWeight,
+    pub line_height: f32,
+}
+
+impl OutlinePanelSettings {
+    pub fn font(&self, cx: &App) -> OutlinePanelFont {
+        let theme_settings = ThemeSettings::get_global(cx);
+        let buffer_font = &theme_settings.buffer_font;
+        OutlinePanelFont {
+            family: self
+                .font_family
+                .clone()
+                .unwrap_or_else(|| buffer_font.family.clone()),
+            size: rems(self.font_size_percentage / 100.0),
+            weight: self.font_weight.unwrap_or(buffer_font.weight),
+            line_height: self
+                .line_height
+                .unwrap_or_else(|| theme_settings.buffer_line_height.value()),
+        }
+    }
 }
 
 pub(crate) trait OutlineSymbolKindExt {
@@ -116,6 +148,15 @@ impl Settings for OutlinePanelSettings {
             },
             expand_outlines_with_depth: panel.expand_outlines_with_depth.unwrap(),
             multi_buffer_hide_symbols: panel.multi_buffer_hide_symbols.unwrap(),
+            font_family: panel.font_family.as_ref().map(|font| font.0.clone().into()),
+            font_size_percentage: panel
+                .font_size
+                .map(|size| size.0)
+                .unwrap_or(settings::DEFAULT_OUTLINE_PANEL_FONT_SIZE_PERCENTAGE.0),
+            font_weight: panel.font_weight.map(|weight| weight.into_gpui()),
+            line_height: panel.line_height.map(|line_height| {
+                theme_settings::buffer_line_height_from_settings(line_height).value()
+            }),
         }
     }
 }

@@ -1267,6 +1267,195 @@ fn appearance_page() -> SettingsPage {
         ]
     }
 
+    fn outline_panel_font_section() -> [SettingsPageItem; 5] {
+        [
+            SettingsPageItem::SectionHeader("Outline Panel Font"),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Font Family",
+                description: "Font family for text in the outline panel. Falls back to the buffer font family.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("outline_panel.font_family"),
+                    pick: |settings_content| {
+                        settings_content
+                            .outline_panel
+                            .as_ref()?
+                            .font_family
+                            .as_ref()
+                            .or(settings_content.theme.buffer_font_family.as_ref())
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .outline_panel
+                            .get_or_insert_default()
+                            .font_family = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Font Size",
+                description: "Font size for text in the outline panel, as a percentage of the UI font size. Defaults to 87.5%.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("outline_panel.font_size"),
+                    pick: |settings_content| {
+                        settings_content
+                            .outline_panel
+                            .as_ref()
+                            .and_then(|panel| panel.font_size.as_ref())
+                            .or(Some(&settings::DEFAULT_OUTLINE_PANEL_FONT_SIZE_PERCENTAGE))
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .outline_panel
+                            .get_or_insert_default()
+                            .font_size = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Font Weight",
+                description: "Font weight for text in the outline panel (100-900). Falls back to the buffer font weight.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("outline_panel.font_weight"),
+                    pick: |settings_content| {
+                        settings_content
+                            .outline_panel
+                            .as_ref()?
+                            .font_weight
+                            .as_ref()
+                            .or(settings_content.theme.buffer_font_weight.as_ref())
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .outline_panel
+                            .get_or_insert_default()
+                            .font_weight = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::DynamicItem(DynamicItem {
+                discriminant: SettingItem {
+                    files: USER,
+                    title: "Line Height",
+                    description: "Line height for text in the outline panel. Falls back to the buffer line height.",
+                    field: Box::new(SettingField {
+                        organization_override: None,
+                        json_path: Some("outline_panel.line_height$"),
+                        pick: |settings_content| {
+                            let line_height = settings_content
+                                .outline_panel
+                                .as_ref()
+                                .and_then(|panel| panel.line_height.as_ref())
+                                .or(settings_content.theme.buffer_line_height.as_ref())?;
+                            Some(
+                                &dynamic_variants::<settings::BufferLineHeight>()
+                                    [line_height.discriminant() as usize],
+                            )
+                        },
+                        write: |settings_content, value, _| {
+                            let Some(value) = value else {
+                                settings_content
+                                    .outline_panel
+                                    .get_or_insert_default()
+                                    .line_height = None;
+                                return;
+                            };
+                            let fallback = settings_content
+                                .outline_panel
+                                .as_ref()
+                                .and_then(|panel| panel.line_height.as_ref())
+                                .or(settings_content.theme.buffer_line_height.as_ref())
+                                .copied()
+                                .unwrap_or_default();
+                            let settings_value = settings_content
+                                .outline_panel
+                                .get_or_insert_default()
+                                .line_height
+                                .get_or_insert(fallback);
+                            *settings_value = match value {
+                                settings::BufferLineHeightDiscriminants::Comfortable => {
+                                    settings::BufferLineHeight::Comfortable
+                                }
+                                settings::BufferLineHeightDiscriminants::Standard => {
+                                    settings::BufferLineHeight::Standard
+                                }
+                                settings::BufferLineHeightDiscriminants::Custom => {
+                                    let custom_value =
+                                        theme_settings::buffer_line_height_from_settings(
+                                            *settings_value,
+                                        )
+                                        .value();
+                                    settings::BufferLineHeight::Custom(custom_value)
+                                }
+                            };
+                        },
+                    }),
+                    metadata: None,
+                },
+                pick_discriminant: |settings_content| {
+                    let line_height = settings_content
+                        .outline_panel
+                        .as_ref()
+                        .and_then(|panel| panel.line_height.as_ref())
+                        .or(settings_content.theme.buffer_line_height.as_ref())?;
+                    Some(line_height.discriminant() as usize)
+                },
+                fields: dynamic_variants::<settings::BufferLineHeight>()
+                    .into_iter()
+                    .map(|variant| match variant {
+                        settings::BufferLineHeightDiscriminants::Comfortable
+                        | settings::BufferLineHeightDiscriminants::Standard => vec![],
+                        settings::BufferLineHeightDiscriminants::Custom => vec![SettingItem {
+                            files: USER,
+                            title: "Custom Line Height",
+                            description: "Custom line height value (must be at least 1.0).",
+                            field: Box::new(SettingField {
+                                organization_override: None,
+                                json_path: Some("outline_panel.line_height"),
+                                pick: |settings_content| match settings_content
+                                    .outline_panel
+                                    .as_ref()
+                                    .and_then(|panel| panel.line_height.as_ref())
+                                {
+                                    Some(settings::BufferLineHeight::Custom(value)) => Some(value),
+                                    Some(_) => None,
+                                    None => {
+                                        match settings_content.theme.buffer_line_height.as_ref()? {
+                                            settings::BufferLineHeight::Custom(value) => {
+                                                Some(value)
+                                            }
+                                            _ => None,
+                                        }
+                                    }
+                                },
+                                write: |settings_content, value, _| {
+                                    let Some(value) = value else {
+                                        return;
+                                    };
+                                    settings_content
+                                        .outline_panel
+                                        .get_or_insert_default()
+                                        .line_height = Some(settings::BufferLineHeight::Custom(
+                                        f32::max(value, 1.0),
+                                    ));
+                                },
+                            }),
+                            metadata: None,
+                        }],
+                    })
+                    .collect(),
+            }),
+        ]
+    }
+
     fn markdown_preview_font_section() -> [SettingsPageItem; 5] {
         [
             SettingsPageItem::SectionHeader("Markdown Preview Font"),
@@ -1674,6 +1863,7 @@ fn appearance_page() -> SettingsPage {
         buffer_font_section(),
         ui_font_section(),
         agent_panel_font_section(),
+        outline_panel_font_section(),
         markdown_preview_font_section(),
         mermaid_font_section(),
         text_rendering_section(),

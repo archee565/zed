@@ -1287,6 +1287,22 @@ pub struct OutlinePanelSettingsContent {
     ///
     /// Default: false
     pub multi_buffer_hide_symbols: Option<bool>,
+    /// The font family to use for text in the outline panel.
+    ///
+    /// Default: inherits from the buffer font family
+    pub font_family: Option<FontFamilyName>,
+    /// The font size to use for text in the outline panel, as a percentage of the UI font size.
+    ///
+    /// Default: 87.5
+    pub font_size: Option<FontSizePercentage>,
+    /// The font weight to use for text in the outline panel, in CSS units from 100 to 900.
+    ///
+    /// Default: inherits from the buffer font weight
+    pub font_weight: Option<FontWeightContent>,
+    /// The line height to use for text in the outline panel.
+    ///
+    /// Default: inherits from the buffer line height
+    pub line_height: Option<BufferLineHeight>,
 }
 
 #[derive(

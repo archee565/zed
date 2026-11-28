@@ -273,6 +273,39 @@ impl From<f32> for FontSize {
     }
 }
 
+/// A font size value in percent of the UI font size, wrapping around `f32` for custom settings UI rendering.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    MergeFrom,
+    PartialEq,
+    PartialOrd,
+    derive_more::FromStr,
+)]
+#[serde(transparent)]
+pub struct FontSizePercentage(
+    #[serde(serialize_with = "serialize_f32_with_two_decimal_places")] pub f32,
+);
+
+/// The default outline panel font size as a percentage of the UI font size.
+pub const DEFAULT_OUTLINE_PANEL_FONT_SIZE_PERCENTAGE: FontSizePercentage = FontSizePercentage(87.5);
+
+impl Display for FontSizePercentage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:.2}", self.0)
+    }
+}
+
+impl From<f32> for FontSizePercentage {
+    fn from(value: f32) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(
     Clone,
     Copy,

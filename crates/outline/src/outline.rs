@@ -7,7 +7,8 @@ use editor::{MultiBufferOffset, RowHighlightOptions, SelectionEffects};
 use fuzzy_nucleo::StringMatch;
 use gpui::{
     App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, HighlightStyle,
-    ParentElement, Point, Rems, Render, Styled, StyledText, Task, WeakEntity, Window, div, rems,
+    ParentElement, Point, Rems, Render, Styled, StyledText, Task, TextStyle, WeakEntity, Window,
+    div, rems,
 };
 use language::{OffsetRangeExt, Outline, OutlineItem, OutlineSearchEntry};
 use picker::{MatchLocation, Picker, PickerDelegate, PreviewUpdate};
@@ -466,6 +467,15 @@ pub fn render_item<T, M: IntoIterator<Item = Range<usize>>>(
     match_ranges: M,
     cx: &App,
 ) -> impl IntoElement + use<T, M> {
+    render_item_with_text_style(outline_item, match_ranges, buffer_text_style(cx), cx)
+}
+
+pub fn render_item_with_text_style<T, M: IntoIterator<Item = Range<usize>>>(
+    outline_item: &OutlineItem<T>,
+    match_ranges: M,
+    text_style: TextStyle,
+    cx: &App,
+) -> impl IntoElement + use<T, M> {
     let highlight_style = HighlightStyle {
         background_color: Some(cx.theme().colors().text_accent.alpha(0.3)),
         ..Default::default()
@@ -474,14 +484,13 @@ pub fn render_item<T, M: IntoIterator<Item = Range<usize>>>(
         .into_iter()
         .map(|range| (range, highlight_style));
 
-    let text_style = buffer_text_style(cx);
-    let buffer_font_size = text_style.font_size;
+    let font_size = text_style.font_size;
     let highlights = gpui::combine_highlights(
         custom_highlights,
         outline_item.highlight_ranges.iter().cloned(),
     );
 
-    div().text_size(buffer_font_size).child(
+    div().text_size(font_size).child(
         StyledText::new(outline_item.text.clone()).with_default_highlights(&text_style, highlights),
     )
 }

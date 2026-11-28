@@ -19,7 +19,7 @@ use gpui::{
     DismissEvent, Div, ElementId, Entity, EventEmitter, FocusHandle, Focusable, HighlightStyle,
     InteractiveElement, IntoElement, KeyContext, ListHorizontalSizingBehavior, ListSizingBehavior,
     MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Render, ScrollStrategy,
-    SharedString, Stateful, StatefulInteractiveElement as _, Styled, Subscription, Task,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled, Subscription, Task, TextStyle,
     UniformListScrollHandle, WeakEntity, Window, actions, anchored, deferred, div, point, px, size,
     uniform_list,
 };
@@ -44,7 +44,9 @@ use std::{
     time::Duration,
 };
 
-use outline_panel_settings::{DockSide, FolderIndicator, OutlinePanelSettings, ShowIndentGuides};
+use outline_panel_settings::{
+    DockSide, FolderIndicator, OutlinePanelFont, OutlinePanelSettings, ShowIndentGuides,
+};
 use project::{File, Fs, Project, ProjectPath};
 use search::{BufferSearchBar, ProjectSearchView};
 use serde::{Deserialize, Serialize};
@@ -2565,9 +2567,12 @@ impl OutlinePanel {
         };
 
         let label = self.excerpt_label(&excerpt, cx)?;
+        let font = OutlinePanelSettings::get_global(cx).font(cx);
         let label_element = Label::new(label)
             .single_line()
             .color(color)
+            .size(LabelSize::Custom(font.size))
+            .weight(font.weight)
             .into_any_element();
 
         Some(self.entry_element(
@@ -2605,11 +2610,13 @@ impl OutlinePanel {
             outline.range, outline.text,
         )));
 
-        let label_element = outline::render_item(
+        let font = OutlinePanelSettings::get_global(cx).font(cx);
+        let label_element = outline::render_item_with_text_style(
             &outline,
             string_match
                 .map(|string_match| string_match.ranges().collect::<Vec<_>>())
                 .unwrap_or_default(),
+            entry_text_style(&font, window, cx),
             cx,
         )
         .into_any_element();
@@ -2664,6 +2671,7 @@ impl OutlinePanel {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let settings = OutlinePanelSettings::get_global(cx);
+        let font = settings.font(cx);
         let is_active = match self.selected_entry() {
             Some(PanelEntry::Fs(selected_entry)) => selected_entry == rendered_entry,
             _ => false,
@@ -2686,13 +2694,16 @@ impl OutlinePanel {
                 };
                 (
                     ElementId::from(("buffer", buffer_id.to_proto())),
-                    HighlightedLabel::new(
-                        name,
-                        string_match
-                            .map(|string_match| string_match.positions.clone())
-                            .unwrap_or_default(),
+                    style_entry_label(
+                        HighlightedLabel::new(
+                            name,
+                            string_match
+                                .map(|string_match| string_match.positions.clone())
+                                .unwrap_or_default(),
+                        )
+                        .color(color),
+                        &font,
                     )
-                    .color(color)
                     .into_any_element(),
                     self.file_expand_collapse_icon(
                         rendered_entry,
@@ -2730,13 +2741,16 @@ impl OutlinePanel {
                         directory.first_buffer_id,
                         &directory.entry.path,
                     ),
-                    HighlightedLabel::new(
-                        name,
-                        string_match
-                            .map(|string_match| string_match.positions.clone())
-                            .unwrap_or_default(),
+                    style_entry_label(
+                        HighlightedLabel::new(
+                            name,
+                            string_match
+                                .map(|string_match| string_match.positions.clone())
+                                .unwrap_or_default(),
+                        )
+                        .color(color),
+                        &font,
                     )
-                    .color(color)
                     .into_any_element(),
                     icon,
                 )
@@ -2762,13 +2776,16 @@ impl OutlinePanel {
                 };
                 (
                     ElementId::from(("buffer", external_file.buffer_id.to_proto())),
-                    HighlightedLabel::new(
-                        name,
-                        string_match
-                            .map(|string_match| string_match.positions.clone())
-                            .unwrap_or_default(),
+                    style_entry_label(
+                        HighlightedLabel::new(
+                            name,
+                            string_match
+                                .map(|string_match| string_match.positions.clone())
+                                .unwrap_or_default(),
+                        )
+                        .color(color),
+                        &font,
                     )
-                    .color(color)
                     .into_any_element(),
                     self.file_expand_collapse_icon(
                         rendered_entry,
@@ -2807,6 +2824,7 @@ impl OutlinePanel {
             Some(PanelEntry::FoldedDirs(selected_dirs)) => selected_dirs == folded_dir,
             _ => false,
         };
+        let font = OutlinePanelSettings::get_global(cx).font(cx);
         let (item_id, label_element, icon) = {
             let name = self.dir_names_string(&folded_dir.entries, folded_dir.worktree_id, cx);
 
@@ -2844,13 +2862,16 @@ impl OutlinePanel {
                     .unwrap_or_else(|| {
                         ElementId::from(("empty-folded-dirs", folded_dir.worktree_id.to_proto()))
                     }),
-                HighlightedLabel::new(
-                    name,
-                    string_match
-                        .map(|string_match| string_match.positions.clone())
-                        .unwrap_or_default(),
+                style_entry_label(
+                    HighlightedLabel::new(
+                        name,
+                        string_match
+                            .map(|string_match| string_match.positions.clone())
+                            .unwrap_or_default(),
+                    )
+                    .color(color),
+                    &font,
                 )
-                .color(color)
                 .into_any_element(),
                 icon,
             )
@@ -2906,7 +2927,8 @@ impl OutlinePanel {
         } else {
             &search_matches
         };
-        let label_element = outline::render_item(
+        let font = OutlinePanelSettings::get_global(cx).font(cx);
+        let label_element = outline::render_item_with_text_style(
             &OutlineItem {
                 depth,
                 annotation_range: None,
@@ -2924,9 +2946,11 @@ impl OutlinePanel {
                 kind: None,
             },
             match_ranges.iter().cloned(),
+            entry_text_style(&font, window, cx),
             cx,
         );
-        let truncated_contents_label = || Label::new(TRUNCATED_CONTEXT_MARK);
+        let truncated_contents_label =
+            || style_entry_label(Label::new(TRUNCATED_CONTEXT_MARK), &font);
         let entire_label = h_flex()
             .justify_center()
             .p_0()
@@ -3089,12 +3113,16 @@ impl OutlinePanel {
         cx: &mut Context<OutlinePanel>,
     ) -> Stateful<Div> {
         let settings = OutlinePanelSettings::get_global(cx);
+        let font = settings.font(cx);
         let is_deleted = match &rendered_entry {
             PanelEntry::Fs(FsEntry::File(file)) => file.is_deleted,
             _ => false,
         };
         div()
-            .text_ui(cx)
+            .text_size(font.size)
+            .font_family(font.family.clone())
+            .font_weight(font.weight)
+            .line_height(relative(font.line_height))
             .id(item_id.clone())
             .on_click({
                 let clicked_entry = rendered_entry.clone();
@@ -3125,7 +3153,6 @@ impl OutlinePanel {
                             .child(h_flex().min_w(px(16.)).justify_center().child(icon_element))
                             .child(
                                 h_flex()
-                                    .h_6()
                                     .child(label_element)
                                     .ml_1()
                                     .when(is_deleted, |this| this.line_through()),
@@ -6051,6 +6078,24 @@ fn empty_icon() -> AnyElement {
         .invisible()
         .flex_none()
         .into_any_element()
+}
+
+fn entry_text_style(font: &OutlinePanelFont, window: &Window, cx: &App) -> TextStyle {
+    let buffer_font = &ThemeSettings::get_global(cx).buffer_font;
+    TextStyle {
+        color: cx.theme().colors().text,
+        font_family: font.family.clone(),
+        font_features: buffer_font.features.clone(),
+        font_fallbacks: buffer_font.fallbacks.clone(),
+        font_size: font.size.to_pixels(window.rem_size()).into(),
+        font_weight: font.weight,
+        line_height: relative(font.line_height),
+        ..TextStyle::default()
+    }
+}
+
+fn style_entry_label<L: LabelCommon>(label: L, font: &OutlinePanelFont) -> L {
+    label.size(LabelSize::Custom(font.size)).weight(font.weight)
 }
 
 #[derive(Debug, Default)]

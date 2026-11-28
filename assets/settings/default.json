@@ -1076,6 +1076,18 @@
     // showing only files and directories.
     // Does not affect single-file views.
     "multi_buffer_hide_symbols": false,
+    // The font family to use for text in the outline panel.
+    // When unset, inherits from the buffer font family.
+    "font_family": null,
+    // The font size to use for text in the outline panel, as a percentage of the UI font size.
+    // When unset, defaults to 87.5.
+    "font_size": null,
+    // The font weight to use for text in the outline panel, in CSS units from 100 to 900.
+    // When unset, inherits from the buffer font weight.
+    "font_weight": null,
+    // The line height to use for text in the outline panel.
+    // When unset, inherits from the buffer line height.
+    "line_height": null,
   },
   "collaboration_panel": {
     // Whether to show the collaboration panel button in the status bar.
