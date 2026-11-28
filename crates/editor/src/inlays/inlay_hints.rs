@@ -7029,6 +7029,11 @@ let c = 3;"#
             crate::init(cx);
         });
 
+        update_test_editor_settings(cx, &|settings| {
+            settings.smooth_scroll = Some(settings::SmoothScrollContent {
+                enabled: Some(false),
+            });
+        });
         update_test_language_settings(cx, f);
     }
 

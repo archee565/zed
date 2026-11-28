@@ -10380,9 +10380,12 @@ impl Editor {
         let old_cursor_shape = self.cursor_shape;
         let old_breadcrumbs_visible = self.breadcrumbs_visible();
 
+        let finish_smooth_scroll;
         {
             let editor_settings = EditorSettings::get_global(cx);
             self.scroll_manager.vertical_scroll_margin = editor_settings.vertical_scroll_margin;
+            self.scroll_manager.smooth_scroll = editor_settings.smooth_scroll.enabled;
+            finish_smooth_scroll = !self.scroll_manager.smooth_scroll;
             if self.breadcrumbs_visibility.settings_visibility()
                 != editor_settings.toolbar.breadcrumbs
             {
@@ -10390,6 +10393,9 @@ impl Editor {
                     BreadcrumbsVisibility::new(editor_settings.toolbar.breadcrumbs);
             }
             self.cursor_shape = editor_settings.cursor_shape.unwrap_or_default();
+        }
+        if finish_smooth_scroll {
+            self.finish_smooth_scroll(window, cx);
         }
 
         if old_cursor_shape != self.cursor_shape {

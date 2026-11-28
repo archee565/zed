@@ -3923,6 +3923,325 @@ async fn test_scroll_page_up_page_down(cx: &mut TestAppContext) {
     });
 }
 
+fn enable_smooth_scroll(cx: &mut TestAppContext) {
+    update_test_editor_settings(cx, &|settings| {
+        settings.smooth_scroll = Some(settings::SmoothScrollContent {
+            enabled: Some(true),
+        });
+    });
+}
+
+#[gpui::test]
+async fn test_smooth_scroll_is_time_based_and_skips_frames(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+    enable_smooth_scroll(cx);
+    let mut cx = EditorTestContext::new(cx).await;
+    let line_height = cx.update_editor(|editor, window, cx| {
+        editor
+            .style(cx)
+            .text
+            .line_height_in_pixels(window.rem_size())
+    });
+    cx.simulate_window_resize(cx.window, size(px(1000.), 4. * line_height));
+    cx.set_state(indoc! {"
+        ˇone
+        two
+        three
+        four
+        five
+        six
+        seven
+        eight
+        nine
+        ten
+        eleven
+        twelve
+    "});
+
+    cx.update_editor(|editor, window, cx| {
+        editor.scroll_smoothly(point(0., 8.), window, cx);
+        assert_eq!(
+            editor.scroll_manager.scroll_animation_target(),
+            Some(point(0., 8.))
+        );
+    });
+
+    // No frame is rendered during this interval; the animation should still
+    // advance by wall-clock time when a frame finally arrives.
+    cx.cx
+        .background_executor
+        .advance_clock(std::time::Duration::from_millis(50));
+    let intermediate = cx.update_editor(|editor, window, cx| {
+        editor.advance_smooth_scroll(window, cx);
+        editor.snapshot(window, cx).scroll_position()
+    });
+    assert!(intermediate.y > 0.);
+    assert!(intermediate.y < 8.);
+
+    // Rendering the same timestamp twice must not advance the animation.
+    let same_time = cx.update_editor(|editor, window, cx| {
+        editor.advance_smooth_scroll(window, cx);
+        editor.snapshot(window, cx).scroll_position()
+    });
+    assert_eq!(intermediate, same_time);
+
+    // Skip past the end of the animation: a single frame lands exactly on the
+    // target and the animation is cleared.
+    cx.cx
+        .background_executor
+        .advance_clock(std::time::Duration::from_millis(100));
+    cx.update_editor(|editor, window, cx| {
+        let is_animating = editor.advance_smooth_scroll(window, cx);
+        assert!(!is_animating);
+        assert_eq!(editor.scroll_manager.scroll_animation_target(), None);
+        assert_eq!(editor.snapshot(window, cx).scroll_position(), point(0., 8.));
+    });
+}
+
+#[gpui::test]
+async fn test_smooth_scroll_uses_target_for_cursor_margin(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+    enable_smooth_scroll(cx);
+    let mut cx = EditorTestContext::new(cx).await;
+    let line_height = cx.update_editor(|editor, window, cx| {
+        editor
+            .style(cx)
+            .text
+            .line_height_in_pixels(window.rem_size())
+    });
+    cx.simulate_window_resize(cx.window, size(px(1000.), 4. * line_height));
+    cx.set_state(indoc! {"
+        ˇone
+        two
+        three
+        four
+        five
+        six
+        seven
+        eight
+        nine
+        ten
+        eleven
+        twelve
+    "});
+
+    cx.update_editor(|editor, window, cx| {
+        editor.scroll_screen_with_cursor_margin(&ScrollAmount::Page(1.), window, cx);
+
+        // The viewport is still at the top, but the cursor margin must be
+        // computed against the animation's target so the cursor does not end
+        // up above the viewport when the animation finishes.
+        assert_eq!(
+            editor.snapshot(window, cx).scroll_position().y,
+            0.,
+            "animation should not have advanced without a frame"
+        );
+        let cursor_row = editor
+            .selections
+            .newest_display(&editor.display_snapshot(cx))
+            .head()
+            .row();
+        assert_eq!(cursor_row, DisplayRow(5));
+    });
+}
+
+#[gpui::test]
+async fn test_smooth_scroll_retargets_from_current_position(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+    enable_smooth_scroll(cx);
+    let mut cx = EditorTestContext::new(cx).await;
+    let line_height = cx.update_editor(|editor, window, cx| {
+        editor
+            .style(cx)
+            .text
+            .line_height_in_pixels(window.rem_size())
+    });
+    cx.simulate_window_resize(cx.window, size(px(1000.), 4. * line_height));
+    cx.set_state(indoc! {"
+        ˇone
+        two
+        three
+        four
+        five
+        six
+        seven
+        eight
+        nine
+        ten
+        eleven
+        twelve
+    "});
+
+    cx.update_editor(|editor, window, cx| {
+        editor.scroll_smoothly(point(0., 8.), window, cx);
+    });
+    cx.cx
+        .background_executor
+        .advance_clock(std::time::Duration::from_millis(50));
+    let position_before_retarget = cx.update_editor(|editor, window, cx| {
+        editor.advance_smooth_scroll(window, cx);
+        editor.snapshot(window, cx).scroll_position()
+    });
+    assert!(position_before_retarget.y > 0.);
+    assert!(position_before_retarget.y < 8.);
+
+    cx.update_editor(|editor, window, cx| {
+        editor.scroll_smoothly(point(0., 4.), window, cx);
+        assert_eq!(
+            editor.scroll_manager.scroll_animation_target(),
+            Some(point(0., 4.))
+        );
+    });
+
+    cx.cx
+        .background_executor
+        .advance_clock(std::time::Duration::from_millis(200));
+    cx.update_editor(|editor, window, cx| {
+        editor.advance_smooth_scroll(window, cx);
+        assert_eq!(editor.snapshot(window, cx).scroll_position(), point(0., 4.));
+    });
+}
+
+#[gpui::test]
+async fn test_smooth_scroll_drives_animation_frames(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+    enable_smooth_scroll(cx);
+    let mut cx = EditorTestContext::new(cx).await;
+    let line_height = cx.update_editor(|editor, window, cx| {
+        editor
+            .style(cx)
+            .text
+            .line_height_in_pixels(window.rem_size())
+    });
+    cx.simulate_window_resize(cx.window, size(px(1000.), 4. * line_height));
+    cx.set_state(indoc! {"
+        ˇone
+        two
+        three
+        four
+        five
+        six
+        seven
+        eight
+        nine
+        ten
+        eleven
+        twelve
+    "});
+
+    cx.update_editor(|editor, window, cx| {
+        editor.scroll_smoothly(point(0., 8.), window, cx);
+    });
+    cx.run_until_parked();
+
+    cx.cx
+        .background_executor
+        .advance_clock(std::time::Duration::from_millis(50));
+    assert!(
+        cx.cx
+            .update_window(cx.window, |_, window, cx| {
+                window.simulate_next_frame(cx)
+            })
+            .unwrap()
+            > 0,
+        "the editor should request another frame while animating"
+    );
+    cx.run_until_parked();
+
+    let scroll_position =
+        cx.update_editor(|editor, window, cx| editor.snapshot(window, cx).scroll_position());
+    assert!(scroll_position.y > 0.);
+    assert!(scroll_position.y < 8.);
+}
+
+#[gpui::test]
+async fn test_smooth_scroll_screen_is_animated(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+    enable_smooth_scroll(cx);
+    let mut cx = EditorTestContext::new(cx).await;
+    let line_height = cx.update_editor(|editor, window, cx| {
+        editor
+            .style(cx)
+            .text
+            .line_height_in_pixels(window.rem_size())
+    });
+    cx.simulate_window_resize(cx.window, size(px(1000.), 4. * line_height));
+    cx.set_state(indoc! {"
+        ˇone
+        two
+        three
+        four
+        five
+        six
+        seven
+        eight
+        nine
+        ten
+        eleven
+        twelve
+    "});
+
+    cx.update_editor(|editor, window, cx| {
+        editor.scroll_screen(&ScrollAmount::Page(1.), window, cx);
+        assert_eq!(
+            editor.scroll_manager.scroll_animation_target(),
+            Some(point(0., 3.))
+        );
+        assert_eq!(editor.snapshot(window, cx).scroll_position(), point(0., 0.));
+    });
+
+    cx.cx
+        .background_executor
+        .advance_clock(std::time::Duration::from_millis(50));
+    let intermediate = cx.update_editor(|editor, window, cx| {
+        editor.advance_smooth_scroll(window, cx);
+        editor.snapshot(window, cx).scroll_position()
+    });
+    assert!(intermediate.y > 0.);
+    assert!(intermediate.y < 3.);
+
+    cx.cx
+        .background_executor
+        .advance_clock(std::time::Duration::from_millis(100));
+    cx.update_editor(|editor, window, cx| {
+        editor.advance_smooth_scroll(window, cx);
+        assert_eq!(editor.snapshot(window, cx).scroll_position(), point(0., 3.));
+    });
+}
+
+#[gpui::test]
+async fn test_smooth_scroll_disabled_is_instant(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+    let mut cx = EditorTestContext::new(cx).await;
+    let line_height = cx.update_editor(|editor, window, cx| {
+        editor
+            .style(cx)
+            .text
+            .line_height_in_pixels(window.rem_size())
+    });
+    cx.simulate_window_resize(cx.window, size(px(1000.), 4. * line_height));
+    cx.set_state(indoc! {"
+        ˇone
+        two
+        three
+        four
+        five
+        six
+        seven
+        eight
+        nine
+        ten
+        eleven
+        twelve
+    "});
+
+    cx.update_editor(|editor, window, cx| {
+        editor.scroll_screen(&ScrollAmount::Page(1.), window, cx);
+        assert_eq!(editor.scroll_manager.scroll_animation_target(), None);
+        assert_eq!(editor.snapshot(window, cx).scroll_position(), point(0., 3.));
+    });
+}
+
 #[gpui::test]
 async fn test_newest_selection_on_screen_with_multibyte_chars(cx: &mut TestAppContext) {
     init_test(cx, |_| {});
@@ -42989,6 +43308,11 @@ pub(crate) fn init_test(cx: &mut TestAppContext, f: fn(&mut AllLanguageSettingsC
         crate::init(cx);
     });
     zlog::init_test();
+    update_test_editor_settings(cx, &|settings| {
+        settings.smooth_scroll = Some(settings::SmoothScrollContent {
+            enabled: Some(false),
+        });
+    });
     update_test_language_settings(cx, &f);
 }
 

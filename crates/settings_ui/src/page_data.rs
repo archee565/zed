@@ -2219,7 +2219,7 @@ fn editor_page() -> SettingsPage {
         ]
     }
 
-    fn scrolling_section() -> [SettingsPageItem; 9] {
+    fn scrolling_section() -> [SettingsPageItem; 10] {
         [
             SettingsPageItem::SectionHeader("Scrolling"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -2309,6 +2309,30 @@ fn editor_page() -> SettingsPage {
                     },
                     write: |settings_content, value, _| {
                         settings_content.editor.fast_scroll_sensitivity = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Smooth Scrolling",
+                description: "Whether to animate scrolling with a smooth easing effect.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("smooth_scroll.enabled"),
+                    pick: |settings_content| {
+                        settings_content
+                            .editor
+                            .smooth_scroll
+                            .as_ref()
+                            .and_then(|smooth_scroll| smooth_scroll.enabled.as_ref())
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .editor
+                            .smooth_scroll
+                            .get_or_insert_default()
+                            .enabled = value;
                     },
                 }),
                 metadata: None,

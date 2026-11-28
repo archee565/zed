@@ -110,6 +110,10 @@ pub struct EditorSettingsContent {
     /// Default: 4.0
     #[serde(serialize_with = "crate::serialize_optional_f32_with_two_decimal_places")]
     pub fast_scroll_sensitivity: Option<f32>,
+    /// Settings for smooth scrolling.
+    ///
+    /// Default: smooth scrolling is enabled
+    pub smooth_scroll: Option<SmoothScrollContent>,
     /// Settings for sticking scopes to the top of the editor.
     ///
     /// Default: sticky scroll is disabled
@@ -436,6 +440,16 @@ pub struct ScrollbarContent {
     pub cursors: Option<bool>,
     /// Forcefully enable or disable the scrollbar for each axis
     pub axes: Option<ScrollbarAxesContent>,
+}
+
+/// Smooth scroll related settings
+#[with_fallible_options]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, JsonSchema, MergeFrom, PartialEq)]
+pub struct SmoothScrollContent {
+    /// Whether smooth scroll is enabled.
+    ///
+    /// Default: true
+    pub enabled: Option<bool>,
 }
 
 /// Sticky scroll related settings

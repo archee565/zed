@@ -524,22 +524,33 @@ impl EditorElement {
                         editor.update(cx, |editor, cx| {
                             let line_height = position_map.line_height;
                             let glyph_width = position_map.em_layout_width;
-                            let delta = match delta {
+                            let (delta, precise) = match delta {
                                 gpui::ScrollDelta::Pixels(mut pixels) => {
                                     //Trackpad
                                     editor
                                         .scroll_manager
                                         .filter_scroll_delta(&mut pixels, event.touch_phase);
-                                    pixels
+                                    (pixels, true)
                                 }
 
                                 gpui::ScrollDelta::Lines(lines) => {
                                     //Not trackpad
-                                    point(lines.x * glyph_width, lines.y * line_height)
+                                    (point(lines.x * glyph_width, lines.y * line_height), false)
                                 }
                             };
 
-                            let current_scroll_position = position_map.snapshot.scroll_position();
+                            // Precise (trackpad) deltas already arrive continuously,
+                            // so apply them directly. Line-based wheel deltas are
+                            // animated, and accumulate on top of the animation target.
+                            let current_scroll_position = if precise {
+                                editor.scroll_manager.cancel_scroll_animation();
+                                position_map.snapshot.scroll_position()
+                            } else {
+                                editor
+                                    .scroll_manager
+                                    .scroll_animation_target()
+                                    .unwrap_or_else(|| position_map.snapshot.scroll_position())
+                            };
                             let x = (current_scroll_position.x
                                 * ScrollPixelOffset::from(glyph_width)
                                 - ScrollPixelOffset::from(delta.x * scroll_sensitivity))
@@ -557,7 +568,11 @@ impl EditorElement {
                             }
 
                             if scroll_position != current_scroll_position {
-                                editor.scroll(scroll_position, window, cx);
+                                if precise {
+                                    editor.scroll(scroll_position, window, cx);
+                                } else {
+                                    editor.scroll_smoothly(scroll_position, window, cx);
+                                }
                                 cx.stop_propagation();
                             }
                         });
