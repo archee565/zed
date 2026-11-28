@@ -4155,6 +4155,126 @@ async fn test_smooth_scroll_drives_animation_frames(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn test_smooth_scroll_reschedules_until_complete(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+    enable_smooth_scroll(cx);
+    let mut cx = EditorTestContext::new(cx).await;
+    let line_height = cx.update_editor(|editor, window, cx| {
+        editor
+            .style(cx)
+            .text
+            .line_height_in_pixels(window.rem_size())
+    });
+    cx.simulate_window_resize(cx.window, size(px(1000.), 4. * line_height));
+    cx.set_state(indoc! {"
+        ˇone
+        two
+        three
+        four
+        five
+        six
+        seven
+        eight
+        nine
+        ten
+        eleven
+        twelve
+    "});
+
+    cx.update_editor(|editor, window, cx| {
+        editor.scroll_smoothly(point(0., 8.), window, cx);
+    });
+    cx.run_until_parked();
+
+    let mut previous_position = 0.;
+    let mut frames = 0;
+    for _ in 0..30 {
+        cx.cx
+            .background_executor
+            .advance_clock(std::time::Duration::from_millis(7));
+        cx.cx
+            .update_window(cx.window, |_, window, cx| window.simulate_next_frame(cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        let position =
+            cx.update_editor(|editor, window, cx| editor.snapshot(window, cx).scroll_position().y);
+        assert!(
+            position >= previous_position,
+            "scroll position should not move backwards"
+        );
+        previous_position = position;
+        frames += 1;
+
+        if position == 8. {
+            break;
+        }
+    }
+
+    assert_eq!(previous_position, 8.);
+    assert!(
+        frames >= 5,
+        "animation should span multiple frames, got {frames}"
+    );
+}
+
+#[gpui::test]
+async fn test_instant_scroll_cancels_smooth_scroll(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+    enable_smooth_scroll(cx);
+    let mut cx = EditorTestContext::new(cx).await;
+    let line_height = cx.update_editor(|editor, window, cx| {
+        editor
+            .style(cx)
+            .text
+            .line_height_in_pixels(window.rem_size())
+    });
+    cx.simulate_window_resize(cx.window, size(px(1000.), 4. * line_height));
+    cx.set_state(indoc! {"
+        ˇone
+        two
+        three
+        four
+        five
+        six
+        seven
+        eight
+        nine
+        ten
+        eleven
+        twelve
+    "});
+
+    cx.update_editor(|editor, window, cx| {
+        editor.scroll_smoothly(point(0., 8.), window, cx);
+    });
+    cx.run_until_parked();
+
+    cx.update_editor(|editor, window, cx| {
+        editor.set_scroll_position(point(0., 2.), window, cx);
+    });
+    assert_eq!(
+        cx.update_editor(|editor, _, _| editor.scroll_manager.scroll_animation_target()),
+        None
+    );
+
+    // Let the previously scheduled animation frame run. It must not resume the
+    // canceled animation.
+    cx.cx
+        .background_executor
+        .advance_clock(std::time::Duration::from_millis(50));
+    cx.cx
+        .update_window(cx.window, |_, window, cx| window.simulate_next_frame(cx))
+        .unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(
+        cx.update_editor(|editor, window, cx| editor.snapshot(window, cx).scroll_position()),
+        point(0., 2.)
+    );
+}
+
+#[gpui::test]
 async fn test_smooth_scroll_screen_is_animated(cx: &mut TestAppContext) {
     init_test(cx, |_| {});
     enable_smooth_scroll(cx);

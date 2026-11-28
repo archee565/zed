@@ -227,6 +227,11 @@ pub struct ScrollManager {
     forbid_vertical_scroll: bool,
     minimap_thumb_state: Option<ScrollbarThumbState>,
     scroll_animation: Option<ScrollAnimation>,
+    animation_frame_scheduled: bool,
+    animation_frame_generation: u64,
+    last_prepaint_at: Option<Instant>,
+    last_animation_tick_at: Option<Instant>,
+    force_animation_refresh: bool,
     _save_scroll_position_task: Task<()>,
 }
 
@@ -253,8 +258,40 @@ impl ScrollManager {
             forbid_vertical_scroll: false,
             minimap_thumb_state: None,
             scroll_animation: None,
+            animation_frame_scheduled: false,
+            animation_frame_generation: 0,
+            last_prepaint_at: None,
+            last_animation_tick_at: None,
+            force_animation_refresh: false,
             _save_scroll_position_task: Task::ready(()),
         }
+    }
+
+    pub(crate) fn note_prepainted(&mut self, now: Instant) {
+        self.last_prepaint_at = Some(now);
+    }
+
+    fn schedule_animation_frame(&mut self, window: &mut Window, cx: &mut Context<Editor>) {
+        if self.animation_frame_scheduled || self.scroll_animation.is_none() {
+            return;
+        }
+        self.animation_frame_scheduled = true;
+        let generation = self.animation_frame_generation;
+
+        let editor = cx.entity().downgrade();
+        window.on_next_frame(move |window, cx| {
+            editor
+                .update(cx, |editor, cx| {
+                    if editor.scroll_manager.animation_frame_generation != generation {
+                        return;
+                    }
+                    editor.scroll_manager.animation_frame_scheduled = false;
+                    if editor.advance_smooth_scroll(window, cx) {
+                        editor.scroll_manager.schedule_animation_frame(window, cx);
+                    }
+                })
+                .ok();
+        });
     }
 
     pub fn clone_state(
@@ -451,6 +488,10 @@ impl ScrollManager {
 
     pub(crate) fn cancel_scroll_animation(&mut self) {
         self.scroll_animation = None;
+        self.animation_frame_generation = self.animation_frame_generation.wrapping_add(1);
+        self.animation_frame_scheduled = false;
+        self.last_animation_tick_at = None;
+        self.force_animation_refresh = false;
     }
 
     fn scroll_to(
@@ -472,6 +513,10 @@ impl ScrollManager {
             animation.start_time = now;
             animation.duration = SMOOTH_SCROLL_DURATION;
         } else if current_position != target_position {
+            self.animation_frame_generation = self.animation_frame_generation.wrapping_add(1);
+            self.animation_frame_scheduled = false;
+            self.last_animation_tick_at = None;
+            self.force_animation_refresh = false;
             self.scroll_animation = Some(ScrollAnimation::new(
                 current_position,
                 target_position,
@@ -623,7 +668,7 @@ impl ScrollManager {
     ) -> WasScrolled {
         // Any explicit scroll cancels an in-flight animation. The animation
         // itself commits through this method with `force` set.
-        self.scroll_animation = None;
+        self.cancel_scroll_animation();
 
         let adjusted_anchor = if self.forbid_vertical_scroll {
             let current = self.anchor.read(cx);
@@ -910,17 +955,18 @@ impl Editor {
 
         self.scroll_manager
             .scroll_to(current_position, target, cx.background_executor().now());
+        self.scroll_manager.schedule_animation_frame(window, cx);
         cx.notify();
     }
 
-    /// Advances an in-flight smooth scroll. Must be called before taking the
-    /// snapshot that will be rendered.
+    /// Advances an in-flight smooth scroll and ensures the editor repaints.
     pub(crate) fn advance_smooth_scroll(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if !self.can_animate_scroll() {
+            self.scroll_manager.cancel_scroll_animation();
             return false;
         }
 
@@ -938,6 +984,29 @@ impl Editor {
                     scroll_beyond_last_line,
                     cx,
                 );
+
+                // Invalidate the editor explicitly instead of going through
+                // `request_animation_frame`, which notifies whichever view
+                // happens to be current. If a previous tick did not reach
+                // editor prepaint, latch into forcing a redraw for the rest of
+                // the animation. This also keeps Wayland on the compositor
+                // frame callback path instead of its retry timer.
+                let previous_tick = self.scroll_manager.last_animation_tick_at;
+                self.scroll_manager.last_animation_tick_at = Some(now);
+                let missed_prepaint = previous_tick.is_some_and(|previous_tick| {
+                    self.scroll_manager
+                        .last_prepaint_at
+                        .is_none_or(|prepainted_at| prepainted_at < previous_tick)
+                });
+                if missed_prepaint {
+                    self.scroll_manager.force_animation_refresh = true;
+                }
+
+                cx.notify();
+                if self.scroll_manager.force_animation_refresh {
+                    window.refresh();
+                }
+
                 true
             }
             ScrollAnimationFrame::Finished(position) => {

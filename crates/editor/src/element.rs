@@ -8579,18 +8579,12 @@ impl Element for EditorElement {
         window.with_rem_size(rem_size, |window| {
             window.with_text_style(Some(text_style), |window| {
                 window.with_content_mask(Some(ContentMask { bounds }), |window| {
-                    let (mut snapshot, is_read_only, is_smooth_scrolling) =
-                        self.editor.update(cx, |editor, cx| {
-                            let is_smooth_scrolling = editor.advance_smooth_scroll(window, cx);
-                            (
-                                editor.snapshot(window, cx),
-                                editor.read_only(cx),
-                                is_smooth_scrolling,
-                            )
-                        });
-                    if is_smooth_scrolling {
-                        window.request_animation_frame();
-                    }
+                    let (mut snapshot, is_read_only) = self.editor.update(cx, |editor, cx| {
+                        editor
+                            .scroll_manager
+                            .note_prepainted(cx.background_executor().now());
+                        (editor.snapshot(window, cx), editor.read_only(cx))
+                    });
                     let style = &self.style;
 
                     let rem_size = window.rem_size();
